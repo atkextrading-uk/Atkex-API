@@ -1,50 +1,16 @@
 /**
- * Map one MT5 deal to SR_Hedge__c fields.
- * Adjust the target field API names to match your org.
- */
-function mapDealToHedge(deal) {
-  return {
-    attributes: { type: "SR_Hedge__c" },
-
-    // Suggested custom fields — rename to your actual API names:
-    //Deal_Id__c: deal.id,
-    //Platform__c: deal.platform,
-    //Deal_Type__c: deal.type,
-    //Deal_Time__c: deal.time,
-    //Broker_Time__c: deal.brokerTime,
-    //Commission__c: deal.commission,
-    //Swap__c: deal.swap,
-    //Profit__c: deal.profit,
-    //Symbol__c: deal.symbol || null,
-    //Magic__c: deal.magic ?? null,
-    Oanda_Trade_Id__c: deal.positionId || null,
-    UUID_Text__c: 'AT-0010-' + deal.positionId,
-    //Position_Id__c: deal.positionId || null,
-    //Volume__c: deal.volume ?? null,
-    //Price__c: deal.price ?? null,
-    //Entry_Type__c: deal.entryType || null,
-    //Reason__c: deal.reason || null,
-    //Account_Currency_Exchange_Rate__c: deal.accountCurrencyExchangeRate ?? null
-    Trading_Account__c: '0017Q00001AvONhQAN',
-    Side__c: deal.entryType == 'DEAL_ENTRY_IN' ? deal.type == 'DEAL_TYPE_SELL' ? 'SELL' : 'BUY' : null,
-    X1st_Trade_Profit__c: deal.entryType == 'DEAL_ENTRY_OUT' ? deal.profit : null
-    // Do shit in here to get price on entry close out etc
-  };
-}
-
-/**
  * Consolidate an array of MT5 deals into 1 record per positionId.
  * (Your original body unchanged)
  */
 function consolidateDealsToHedges(
   deals,
-  { tradingAccountId = "0017Q00001AvONhQAN" } = {}
+  { deps: { symbolCatalog } } = {}
 ) {
   // Filter to actual trade legs only
   const tradeDeals = deals.filter(
     d => d.entryType === "DEAL_ENTRY_IN" || d.entryType === "DEAL_ENTRY_OUT"
   );
-
+  
   // group by positionId; fallback to orderId -> id
   const groups = new Map();
   for (const d of tradeDeals) {
@@ -102,20 +68,53 @@ function consolidateDealsToHedges(
 
     // optional: first OUT profit if you want that meaning for X1st_Trade_Profit__c
     const firstOutProfit = outs.length ? Number(outs[0].profit) || 0 : 0;
+    
+    const entryType = any.entryType;
+    const time = any.time;
+    const price = any.price;
+    const volume = any.volume;
+    const profit = any.profit;
+    
+    // Build SR_Hedge__c record (fixed)
+    const currencyId =
+      symbol &&
+      symbolCatalog &&
+      typeof symbolCatalog.getIdBySymbolName === "function"
+        ? (symbolCatalog.getIdBySymbolName(symbol) || null)
+        : null;
 
-    // Build SR_Hedge__c record
+    // prefer explicit first OUT for "first close price" semantics;
+    // keep volume-weighted closePrice for the consolidated close price.
+    const firstOut = outs.length ? outs[0] : null;
+
     const rec = {
-      // Upsert key
-      UUID_Text__c: 'AT-0010-' + positionKey,
+      UUID_Text__c: positionKey,
       attributes: { type: "SR_Hedge__c" },
-      // Your requested fields
-      Trading_Account__c: tradingAccountId,
-      Side__c: side,
-      X1st_Trade_Profit__c: totalProfit, // or use totalProfit if you intended that
-      //Profit__c: totalProfit,
 
-      // (Optional but handy — uncomment if you have these fields)
-      // Position_Id__c: positionKey,
+      // Safe symbol lookup
+      Currency__c: currencyId,
+
+      // Side from your computed net; fixes the ternary that referenced entryType wrongly
+      Side__c: side,
+
+      // Profit consolidation (you said profit was fine)
+      X1st_Trade_Profit__c: totalProfit,
+
+      // OPEN fields (from first IN)
+      X1st_Trade_Open_Price__c: firstIn ? firstIn.price : null,
+      Open_Date_Time__c: openTime || null,
+      X1st_Trade_Units__c: firstIn ? firstIn.volume : null,
+      Open_Comments__c: firstIn ? "API" : null,
+      Open_Screenshot__c: firstIn ? "API" : null,
+
+      // CLOSE fields (from OUT legs; use last OUT time and either first OUT price or VWAP)
+      // If you want the consolidated close price, use `closePrice`; if you want first OUT, use `firstOut?.price`.
+      X1st_Trade_Close_Price__c: firstOut ? firstOut.price : (closePrice ?? null),
+      Close_Date_Time__c: closeTime || null,
+      Closing_Comments__c: outs.length ? "API" : null,
+      Close_Screenshot__c: outs.length ? "API" : null,
+
+      // (Optional but often useful—uncomment if you have these fields)
       // Platform__c: platform,
       // Symbol__c: symbol,
       // Open_Time__c: openTime,

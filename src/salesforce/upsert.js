@@ -38,7 +38,7 @@ async function sfBatchUpsertHedgesByUUID(records) {
       results.push(...resp.data);
     } catch (err) {
       if (err.response && err.response.status === 401) {
-        await sfLogin();
+        //await sfLogin();
         const retry = await axios.patch(
           base,
           { allOrNone: false, records: part },
