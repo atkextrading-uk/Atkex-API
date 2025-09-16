@@ -26,6 +26,7 @@ function createApp({ allowIps = new Set(), allowHosts = new Set(), deps = {} } =
   app.use(express.json({ limit: "100kb" }));
 
   // Rate limit (declare allow lists BEFORE this middleware)
+  
   app.use(
     rateLimit({
       windowMs: 60 * 1000,

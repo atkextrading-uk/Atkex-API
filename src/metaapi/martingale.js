@@ -41,7 +41,7 @@ async function metaLogin(accountId) {
   };
 }
 
-async function placeMarketOrder({ baseUrl, token, accountId, symbol, lotSize, side, stopLoss }) {
+async function placeMarketOrder({ baseUrl, token, accountId, symbol, lotSize, side, stopLoss, takeProfit }) {
   // Replace endpoint + payload with your Meta provider spec
   const url = `${baseUrl}/users/current/accounts/${accountId}/trade`;
   const headers = {
@@ -58,13 +58,14 @@ async function placeMarketOrder({ baseUrl, token, accountId, symbol, lotSize, si
     symbol,
     volume: lotSize,
     actionType,                // "BUY" | "SELL"
-    stopLoss             // numeric SL price
+    stopLoss,             // numeric SL price
+    takeProfit
   };
   const resp = await axios.post(url, payload, { headers });
   return resp.data;
 }
 
-async function placeLimitOrder({ baseUrl, token, accountId, symbol, lotSize, side, openPrice, stopLoss }) {
+async function placeLimitOrder({ baseUrl, token, accountId, symbol, lotSize, side, openPrice, stopLoss, takeProfit }) {
   // Replace endpoint + payload with your Meta provider spec
   const url = `${baseUrl}/users/current/accounts/${accountId}/trade`;
   const headers = {
@@ -82,7 +83,8 @@ async function placeLimitOrder({ baseUrl, token, accountId, symbol, lotSize, sid
     volume: lotSize,
     actionType,                // keep side for clarity
     openPrice,
-    stopLoss
+    stopLoss,
+    takeProfit
   };
   console.log(payload);
 
@@ -117,13 +119,13 @@ module.exports = (auth) => {
    */
   router.post("/place/martingale", auth, async (req, res) => {
     try {
-      const { symbol, lotSize, stopLoss, entry, side, accountId } = req.body || {};
+      const { symbol, lotSize, stopLoss, entry, side, accountId, takeProfit } = req.body || {};
 
       // Basic validation
       const normSide = normalizeSide(side);
-      if (!symbol || !normSide || !isNumber(lotSize) || !isNumber(stopLoss) || !isNumber(entry)) {
+      if (!symbol || !normSide || !isNumber(lotSize) || !isNumber(stopLoss) || !isNumber(entry) || !isNumber(takeProfit)) {
         return res.status(400).json({
-          error: "Required fields: symbol (string), lotSize (number), stopLoss (number), entry (number), side ('BUY'|'SELL')"
+          error: "Required fields: symbol (string), lotSize (number), stopLoss (number), takeProfit (number), entry (number), side ('BUY'|'SELL')"
         });
       }
 
@@ -138,7 +140,8 @@ module.exports = (auth) => {
         symbol,
         lotSize,
         side: normSide,
-        stopLoss
+        stopLoss,
+        takeProfit
       });
 
       // 2) Compute the three equal levels between entry and SL
@@ -161,7 +164,8 @@ module.exports = (auth) => {
           lotSize,
           side: normSide,
           openPrice,
-          stopLoss
+          stopLoss,
+          takeProfit
         });
         limitResults.push({ openPrice, response: r });
       }

@@ -75,6 +75,9 @@ function consolidateDealsToHedges(
     const volume = any.volume;
     const profit = any.profit;
     
+    // Outcome + SL/TP extraction from OUT deals
+    const { outcome, slPrice, tpPrice } = deriveOutcomeAndStops(outs);
+    
     // Build SR_Hedge__c record (fixed)
     const currencyId =
       symbol &&
@@ -113,19 +116,11 @@ function consolidateDealsToHedges(
       Close_Date_Time__c: closeTime || null,
       Closing_Comments__c: outs.length ? "API" : null,
       Close_Screenshot__c: outs.length ? "API" : null,
-
-      // (Optional but often useful—uncomment if you have these fields)
-      // Platform__c: platform,
-      // Symbol__c: symbol,
-      // Open_Time__c: openTime,
-      // Open_Price__c: openPrice,
-      // Open_Volume__c: totalInVolume || null,
-      // Close_Time__c: closeTime,
-      // Close_Price__c: closePrice,
-      // Close_Volume__c: totalOutVolume || null,
-      // Commission__c: totalCommission,
-      // Swap__c: totalSwap,
-      // Status__c: (totalOutVolume >= totalInVolume && totalInVolume > 0) ? "Closed" : "Open"
+      
+      // Reason outing
+      Outcome__c: outcome || null,
+      Stop_Loss_Price__c: slPrice != null && isFinite(slPrice) ? slPrice : null,
+      Take_Profit_Price__c: tpPrice != null && isFinite(tpPrice) ? tpPrice : null,
     };
 
     hedges.push(rec);
@@ -134,4 +129,58 @@ function consolidateDealsToHedges(
   return hedges;
 }
 
-module.exports = { mapDealToHedge, consolidateDealsToHedges };
+// Helper: parse [sl 3628.00] or [tp 3628.00] from brokerComment
+function parseSlTpFromComment(comment) {
+  if (!comment || typeof comment !== "string") return { sl: null, tp: null };
+  const m = /\[(sl|tp)\s+([\d.]+)\]/i.exec(comment);
+  if (!m) return { sl: null, tp: null };
+  const tag = m[1].toLowerCase();
+  const price = Number(m[2]);
+  if (!isFinite(price)) return { sl: null, tp: null };
+  return tag === "sl" ? { sl: price, tp: null } : { sl: null, tp: price };
+}
+
+// Helper: derive Outcome + SL/TP prices from OUT legs
+function deriveOutcomeAndStops(outs) {
+  let outcome = null;
+  let slPrice = null;
+  let tpPrice = null;
+
+  for (const o of outs) {
+    const reason = (o && o.reason ? String(o.reason) : "").toUpperCase();
+    // Prefer explicit fields
+    if (reason.includes("SL")) {
+      outcome = outcome || "SL";
+      if (slPrice == null) {
+        slPrice = (o.stopLoss != null ? Number(o.stopLoss) : null);
+        if (slPrice == null) {
+          const parsed = parseSlTpFromComment(o.brokerComment);
+          if (parsed.sl != null) slPrice = parsed.sl;
+        }
+      }
+    } else if (reason.includes("TP")) {
+      outcome = outcome || "TP";
+      if (tpPrice == null) {
+        // MT5 may send takeProfit or not; fall back to comment
+        const maybeTp = o.takeProfit != null ? Number(o.takeProfit) : null;
+        if (maybeTp != null && isFinite(maybeTp)) {
+          tpPrice = maybeTp;
+        } else {
+          const parsed = parseSlTpFromComment(o.brokerComment);
+          if (parsed.tp != null) tpPrice = parsed.tp;
+        }
+      }
+    } else {
+      // Keep scanning; we only set "Manual" later if nothing was SL/TP
+    }
+  }
+
+  if (!outcome && outs.length > 0) {
+    // Closed but not by SL/TP (e.g., manual close / opposite hedge)
+    outcome = "Manual";
+  }
+
+  return { outcome, slPrice, tpPrice };
+}
+
+module.exports = { consolidateDealsToHedges };

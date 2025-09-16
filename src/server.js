@@ -14,7 +14,7 @@ const { authState, sfLogin } = require("./middleware/auth");
       .map(s => s.trim())
       .filter(Boolean)
   );
-  const allowHosts = new Set(
+   allowHosts = new Set(
     (process.env.ALLOW_HOSTS || "")
       .split(",")
       .map(s => s.trim().toLowerCase())
